@@ -136,6 +136,16 @@
 	};
 };
 
+/*
+ * Ethernet topology (acwifi teardown #26503 + stock DTS cpu_bmp=0x21):
+ *   GMAC1 (pcs0_ch0) <--HSGMII--> QCA8386 port0 (CPU uplink)
+ *   GMAC2 (pcs1_ch0) <--HSGMII--> QCA8386 port5 (CPU uplink)
+ *   All 4x 2.5G copper ports sit behind the QCA8386 switch; mdio phy1..4
+ *   are its integrated PHYs. Shared uplink = 2x2.5G HSGMII = 5Gbps (hw
+ *   bottleneck, by design of the stock product).
+ * NOTE: the direct phy-handle wiring below is a PLACEHOLDER for first-flash
+ * single-port bring-up; mainline PPE has no QCA8386 switch model yet.
+ */
 &qcom_ppe {
 	status = "okay";
 
@@ -240,4 +250,223 @@
 			default-state = "off";
 		};
 	};
+};
+
+/*
+ * M4:QCN9224 5/6G radio(pcie1@0x18000000 = bus 0001 = stock QCN9224_PCI1,三方印证)。
+ * perst=47/wake=48 与 stock pci1-pinmux 及 u7 参考板一致(公版布线)。
+ * 驱动走主线 ath12k PCI 路径(QCN9274_DEVICE_ID 0x1109 真机实证),无需 DT wifi 子节点;
+ * 固件 amss/m3 由 ath12k-firmware-qcn9274 提供,板级 caldata 由 hotplug 脚本自 ART 提取。
+ * (内置 2.4G AHB 需 multipd remoteproc 栈,主线 6.18 未备 → M4b 另立项)
+ */
+&pcie1 {
+	status = "okay";
+	num-lanes = <1>;
+
+	perst-gpios = <&tlmm 47 GPIO_ACTIVE_LOW>;
+	wake-gpios = <&tlmm 48 GPIO_ACTIVE_LOW>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&pcie1_default>;
+};
+
+&pcie1_phy {
+	status = "okay";
+};
+
+&tlmm {
+	pcie1_default: pcie1-default-state {
+		clkreq-n-pins {
+			pins = "gpio46";
+			function = "pcie1_clk";
+			drive-strength = <8>;
+			bias-pull-up;
+		};
+
+		perst-n-pins {
+			pins = "gpio47";
+			function = "gpio";
+			drive-strength = <8>;
+			bias-pull-up;
+			output-low;
+		};
+
+		wake-n-pins {
+			pins = "gpio48";
+			function = "pcie1_wake";
+			drive-strength = <8>;
+			bias-pull-up;
+		};
+	};
+};
+
+/*
+ * M4b(2.4G 内置 AHB)——离线预铺,status=disabled(未经任何 in-tree 板验证的链,
+ * 真机阶段带固件验证后翻一行 status 启用)。链:sec-pil rproc + wcss smp2p + wifi。
+ * 数值来源:基址/中断/内存区全部取自本机 stock 反编译 DT;节点契约取自主线
+ * qcom,ipq5332-wifi.yaml + ipq9574.dtsi 参考链(5332 res_init 不需 tmel,实测驱动源码)。
+ */
+/ {
+reserved-memory {
+	#address-cells = <2>;
+	#size-cells = <2>;
+	ranges;
+
+	q6_region_w: q6@4a900000 {
+		no-map;
+		reg = <0x0 0x4a900000 0x0 0x2b00000>;
+	};
+	m3_dump_w: m3-dump@4d400000 {
+		no-map;
+		reg = <0x0 0x4d400000 0x0 0x100000>;
+	};
+	q6_caldb_w: q6-caldb@4d600000 {
+		no-map;
+		reg = <0x0 0x4d600000 0x0 0x500000>;
+	};
+	mlo_mem_w: mlo@4db00000 {
+		no-map;
+		reg = <0x0 0x4db00000 0x0 0x1100000>;
+	};
+};
+};
+
+/ {
+wcss_smp2p: smp2p-wcss {
+	compatible = "qcom,smp2p";
+	qcom,smem = <435>, <428>;
+
+	interrupt-parent = <&intc>;
+	interrupts = <GIC_SPI 418 IRQ_TYPE_EDGE_RISING>;
+	mboxes = <&apcs_glb 9>;
+
+	wcss_smp2p_out: master-kernel {
+		qcom,entry-name = "master-kernel";
+		#qcom,smem-state-cells = <1>;
+	};
+
+	wcss_smp2p_in: slave-kernel {
+		qcom,entry-name = "slave-kernel";
+		interrupt-controller;
+		#interrupt-cells = <2>;
+	};
+};
+
+q6v5_wcss: remoteproc@d100000 {
+	compatible = "qcom,ipq5332-wcss-sec-pil";
+	reg = <0x0d100000 0x4040>;
+	firmware-name = "IPQ5332/q6_fw0.mdt", "IPQ5332/iu_fw.mdt";
+
+	interrupts-extended = <&intc GIC_SPI 421 IRQ_TYPE_EDGE_RISING>,
+			      <&wcss_smp2p_in 0 IRQ_TYPE_NONE>,
+			      <&wcss_smp2p_in 1 IRQ_TYPE_NONE>,
+			      <&wcss_smp2p_in 2 IRQ_TYPE_NONE>,
+			      <&wcss_smp2p_in 3 IRQ_TYPE_NONE>;
+	interrupt-names = "wdog", "fatal", "ready", "handover", "stop-ack";
+
+	qcom,smem-states = <&wcss_smp2p_out 1>, <&wcss_smp2p_out 0>;
+	qcom,smem-state-names = "stop", "shutdown";
+	memory-region = <&q6_region_w>;
+
+	status = "disabled";
+
+	glink-edge {
+		interrupts = <GIC_SPI 416 IRQ_TYPE_EDGE_RISING>;
+		label = "rtr";
+		qcom,remote-pid = <1>;
+		mboxes = <&apcs_glb 8>;
+	};
+};
+
+wifi_2g: wifi@c000000 {
+	compatible = "qcom,ipq5332-wifi";
+	reg = <0x0c000000 0x1000000>;
+	clocks = <&gcc GCC_XO_CLK>;
+	clock-names = "xo";
+	interrupts-extended = <&wcss_smp2p_in 8 IRQ_TYPE_NONE>,
+			      <&wcss_smp2p_in 9 IRQ_TYPE_NONE>,
+			      <&wcss_smp2p_in 12 IRQ_TYPE_NONE>,
+			      <&wcss_smp2p_in 11 IRQ_TYPE_NONE>,
+			      <&intc GIC_SPI 559 IRQ_TYPE_EDGE_RISING>,
+			      <&intc GIC_SPI 560 IRQ_TYPE_EDGE_RISING>,
+			      <&intc GIC_SPI 561 IRQ_TYPE_EDGE_RISING>,
+			      <&intc GIC_SPI 422 IRQ_TYPE_EDGE_RISING>,
+			      <&intc GIC_SPI 423 IRQ_TYPE_EDGE_RISING>,
+			      <&intc GIC_SPI 424 IRQ_TYPE_EDGE_RISING>,
+			      <&intc GIC_SPI 425 IRQ_TYPE_EDGE_RISING>,
+			      <&intc GIC_SPI 426 IRQ_TYPE_EDGE_RISING>,
+			      <&intc GIC_SPI 427 IRQ_TYPE_EDGE_RISING>,
+			      <&intc GIC_SPI 428 IRQ_TYPE_EDGE_RISING>,
+			      <&intc GIC_SPI 429 IRQ_TYPE_EDGE_RISING>,
+			      <&intc GIC_SPI 430 IRQ_TYPE_EDGE_RISING>,
+			      <&intc GIC_SPI 431 IRQ_TYPE_EDGE_RISING>,
+			      <&intc GIC_SPI 432 IRQ_TYPE_EDGE_RISING>,
+			      <&intc GIC_SPI 433 IRQ_TYPE_EDGE_RISING>,
+			      <&intc GIC_SPI 491 IRQ_TYPE_EDGE_RISING>,
+			      <&intc GIC_SPI 495 IRQ_TYPE_EDGE_RISING>,
+			      <&intc GIC_SPI 493 IRQ_TYPE_EDGE_RISING>,
+			      <&intc GIC_SPI 544 IRQ_TYPE_EDGE_RISING>,
+			      <&intc GIC_SPI 457 IRQ_TYPE_EDGE_RISING>,
+			      <&intc GIC_SPI 466 IRQ_TYPE_EDGE_RISING>,
+			      <&intc GIC_SPI 497 IRQ_TYPE_EDGE_RISING>,
+			      <&intc GIC_SPI 454 IRQ_TYPE_EDGE_RISING>,
+			      <&intc GIC_SPI 453 IRQ_TYPE_EDGE_RISING>,
+			      <&intc GIC_SPI 452 IRQ_TYPE_EDGE_RISING>,
+			      <&intc GIC_SPI 451 IRQ_TYPE_EDGE_RISING>,
+			      <&intc GIC_SPI 488 IRQ_TYPE_EDGE_RISING>,
+			      <&intc GIC_SPI 488 IRQ_TYPE_EDGE_RISING>,
+			      <&intc GIC_SPI 484 IRQ_TYPE_EDGE_RISING>,
+			      <&intc GIC_SPI 554 IRQ_TYPE_EDGE_RISING>,
+			      <&intc GIC_SPI 554 IRQ_TYPE_EDGE_RISING>,
+			      <&intc GIC_SPI 549 IRQ_TYPE_EDGE_RISING>,
+			      <&intc GIC_SPI 507 IRQ_TYPE_EDGE_RISING>,
+			      <&intc GIC_SPI 500 IRQ_TYPE_EDGE_RISING>,
+			      <&intc GIC_SPI 499 IRQ_TYPE_EDGE_RISING>,
+			      <&intc GIC_SPI 498 IRQ_TYPE_EDGE_RISING>,
+			      <&intc GIC_SPI 450 IRQ_TYPE_EDGE_RISING>,
+			      <&intc GIC_SPI 449 IRQ_TYPE_EDGE_RISING>,
+			      <&intc GIC_SPI 448 IRQ_TYPE_EDGE_RISING>,
+			      <&intc GIC_SPI 447 IRQ_TYPE_EDGE_RISING>,
+			      <&intc GIC_SPI 543 IRQ_TYPE_EDGE_RISING>,
+			      <&intc GIC_SPI 486 IRQ_TYPE_EDGE_RISING>,
+			      <&intc GIC_SPI 486 IRQ_TYPE_EDGE_RISING>,
+			      <&intc GIC_SPI 482 IRQ_TYPE_EDGE_RISING>,
+			      <&intc GIC_SPI 419 IRQ_TYPE_EDGE_RISING>;
+	interrupt-names = "fatal", "ready", "spawn", "stop-ack",
+			  "misc-pulse1", "misc-latch", "sw-exception",
+			  "ce0", "ce1", "ce2", "ce3", "ce4", "ce5", "ce6", "ce7",
+			  "ce8", "ce9", "ce10", "ce11",
+			  "host2wbm-desc-feed", "host2reo-re-injection",
+			  "host2reo-command", "host2rxdma-monitor-ring1",
+			  "reo2ost-exception", "wbm2host-rx-release",
+			  "reo2host-status", "reo2host-destination-ring4",
+			  "reo2host-destination-ring3", "reo2host-destination-ring2",
+			  "reo2host-destination-ring1",
+			  "rxdma2host-monitor-destination-mac3",
+			  "rxdma2host-monitor-destination-mac2",
+			  "rxdma2host-monitor-destination-mac1",
+			  "host2rxdma-host-buf-ring-mac3",
+			  "host2rxdma-host-buf-ring-mac2",
+			  "host2rxdma-host-buf-ring-mac1",
+			  "host2tcl-input-ring4", "host2tcl-input-ring3",
+			  "host2tcl-input-ring2", "host2tcl-input-ring1",
+			  "wbm2host-tx-completions-ring4",
+			  "wbm2host-tx-completions-ring3",
+			  "wbm2host-tx-completions-ring2",
+			  "wbm2host-tx-completions-ring1",
+			  "host2tx-monitor-ring1",
+			  "txmon2host-monitor-destination-mac3",
+			  "txmon2host-monitor-destination-mac2",
+			  "txmon2host-monitor-destination-mac1",
+			  "umac-reset";
+
+	memory-region = <&q6_region_w>, <&m3_dump_w>, <&q6_caldb_w>, <&mlo_mem_w>;
+	memory-region-names = "q6-region", "m3-dump", "q6-caldb", "mlo-global-mem";
+	qcom,rproc = <&q6v5_wcss>;
+	qcom,smem-states = <&wcss_smp2p_out 8>,
+			   <&wcss_smp2p_out 9>,
+			   <&wcss_smp2p_out 10>;
+	qcom,smem-state-names = "shutdown", "stop", "spawn";
+
+	status = "disabled";
+};
 };
