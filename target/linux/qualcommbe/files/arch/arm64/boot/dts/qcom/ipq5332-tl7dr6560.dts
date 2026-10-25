@@ -10,6 +10,7 @@
 
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/input/input.h>
+#include <dt-bindings/leds/common.h>
 #include <dt-bindings/interrupt-controller/arm-gic.h>
 #include "ipq5332.dtsi"
 
@@ -208,6 +209,35 @@
 			function = "mdio1";
 			drive-strength = <8>;
 			bias-pull-up;
+		};
+	};
+};
+
+/*
+ * M3/DTB 审计补充(2026-10-25):WPS 键(gpio35)与 2.4G LED(gpio36),取自 stock。
+ * stage-1 瘦身内核无 LED/按键驱动,节点无害;stage-2 全量构建即生效
+ * (failsafe 触发 + 无 UART 时的启动可视化)。
+ */
+/ {
+	gpio-keys {
+		compatible = "gpio-keys";
+
+		button-wps {
+			label = "wps";
+			linux,code = <KEY_WPS_BUTTON>;
+			gpios = <&tlmm 35 GPIO_ACTIVE_LOW>;
+			debounce-interval = <60>;
+		};
+	};
+
+	leds {
+		compatible = "gpio-leds";
+
+		led-2g {
+			color = <LED_COLOR_ID_GREEN>;
+			function = LED_FUNCTION_WLAN;
+			gpios = <&tlmm 36 GPIO_ACTIVE_HIGH>;
+			default-state = "off";
 		};
 	};
 };

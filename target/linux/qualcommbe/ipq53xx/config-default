@@ -64,35 +64,3 @@ CONFIG_SPMI=y
 CONFIG_SPMI_MSM_PMIC_ARB=y
 # CONFIG_SPMI_PMIC_CLKDIV is not set
 CONFIG_UIMAGE_FIT_BLK=y
-
-# ---- stage-1 slim block (M6 第 1 段专用,2026-10-25) ----
-# 仅服务于瘦身 initramfs 构建;最终全量构建时 kmod 包选择会覆盖 USB/WLAN/LEDS 等,
-# SOUND/MEDIA/MD/BPF_SYSCALL/KPROBES/FTRACE 保持关闭(路由器无用,有意为之)。
-# CONFIG_USB_SUPPORT is not set
-# CONFIG_SOUND is not set
-# CONFIG_MEDIA_SUPPORT is not set
-# CONFIG_WLAN is not set
-# CONFIG_WIRELESS is not set
-# CONFIG_SCSI is not set
-# CONFIG_ATA is not set
-# CONFIG_MD is not set
-# CONFIG_FUSE_FS is not set
-# CONFIG_HID_SUPPORT is not set
-# CONFIG_NEW_LEDS is not set
-# CONFIG_STAGING is not set
-# CONFIG_BPF_SYSCALL is not set
-# CONFIG_KPROBES is not set
-# CONFIG_FTRACE is not set
-# CONFIG_BRIDGE is not set
-CONFIG_RD_GZIP=y
-CONFIG_RD_LZMA=y
-# CONFIG_IPV6 is not set
-# CONFIG_KALLSYMS is not set
-CONFIG_QCOM_PPE=y
-CONFIG_PCS_QCOM_IPQ9574=y
-# CONFIG_MODULES is not set
-# CONFIG_PCI is not set
-# CONFIG_MMC is not set
-# CONFIG_SPI is not set
-# CONFIG_CPU_FREQ is not set
-# CONFIG_THERMAL is not set
