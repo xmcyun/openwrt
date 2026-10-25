@@ -1,0 +1,213 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR BSD-3-Clause)
+/*
+ * TP-Link TL-7DR6560 board (Qualcomm IPQ5322 silicon, AP-MI01.6 class)
+ * OpenWrt 移植支线 M2:最小启动板级(USB-UART console + QPIC NAND SMEM 分区)。
+ * 有线(PPE/ESS)/WiFi/QCN9224/LED/按键由后续里程碑扩展。
+ * 无 memory 节点:与主线 ipq5332 RDP 一致,由 bootloader(bootipq)填充。
+ */
+
+/dts-v1/;
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
+#include <dt-bindings/interrupt-controller/arm-gic.h>
+#include "ipq5332.dtsi"
+
+/ {
+	model = "TP-Link TL-7DR6560";
+	compatible = "tp-link,tl7dr6560", "qcom,ipq5332";
+
+	aliases {
+		serial0 = &blsp1_uart0;
+	};
+
+	chosen {
+		stdout-path = "serial0";
+	};
+
+	soc@0 {
+		qpic_bam: dma-controller@7984000 {
+			compatible = "qcom,bam-v1.7.0";
+			reg = <0x07984000 0x1c000>;
+			interrupts = <GIC_SPI 66 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&gcc GCC_QPIC_AHB_CLK>;
+			clock-names = "bam_clk";
+			#dma-cells = <1>;
+			qcom,ee = <0>;
+			status = "okay";
+		};
+
+		nand-controller@79b0000 {
+			compatible = "qcom,ipq6018-nand";
+			reg = <0x079b0000 0x10000>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			clocks = <&gcc GCC_QPIC_CLK>,
+				 <&gcc GCC_QPIC_AHB_CLK>;
+			clock-names = "core", "aon";
+			dmas = <&qpic_bam 0>,
+			       <&qpic_bam 1>,
+			       <&qpic_bam 2>;
+			dma-names = "tx", "rx", "cmd";
+			pinctrl-0 = <&qspi_nand_pins>;
+			pinctrl-names = "default";
+			status = "okay";
+
+			nandcs@0 {
+				reg = <0>;
+				nand-ecc-strength = <4>;
+				nand-ecc-step-size = <512>;
+				nand-bus-width = <8>;
+
+				partitions {
+					compatible = "qcom,smem-parts";
+				};
+			};
+		};
+	};
+};
+
+&blsp1_uart0 {
+	pinctrl-0 = <&serial_0_pins>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+&sleep_clk {
+	clock-frequency = <32000>;
+};
+
+&xo_board {
+	clock-frequency = <24000000>;
+};
+
+&tlmm {
+	qspi_nand_pins: qspi-nand-state {
+		qspi-clk-pins {
+			pins = "gpio13";
+			function = "qspi_clk";
+			drive-strength = <8>;
+			bias-pull-down;
+		};
+
+		qspi-cs-pins {
+			pins = "gpio12";
+			function = "qspi_cs";
+			drive-strength = <8>;
+			bias-pull-up;
+		};
+
+		qspi-data-pins {
+			pins = "gpio8", "gpio9", "gpio10", "gpio11";
+			function = "qspi_data";
+			drive-strength = <8>;
+			bias-pull-down;
+		};
+	};
+};
+
+/*
+ * M3 以太网段(实验 v1):
+ * - 4 个铜口 PHY(mdio 地址 1-4,QCA80xx 族)对 2 个 GMAC 的完整映射待真机核对;
+ *   v1 先接 WAN(port1)与 LAN 组(port2),stage-1 闸门只需单口可通。
+ * - 口序/phy-mode/PCS 通道为初始假设,首刷后按实测修正。
+ */
+&mdio {
+	status = "okay";
+
+	pinctrl-0 = <&mdio_pins>;
+	pinctrl-names = "default";
+
+	phy1: ethernet-phy@1 {
+		reg = <0x01>;
+	};
+
+	phy2: ethernet-phy@2 {
+		reg = <0x02>;
+	};
+
+	phy3: ethernet-phy@3 {
+		reg = <0x03>;
+	};
+
+	phy4: ethernet-phy@4 {
+		reg = <0x04>;
+	};
+};
+
+&qcom_ppe {
+	status = "okay";
+
+	ethernet-ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		gmac1: port@1 {
+			reg = <1>;
+			label = "wan";
+			phy-mode = "sgmii";
+			phy-handle = <&phy4>;
+			pcs-handle = <&pcs0_ch0>;
+			local-mac-address = [00 00 00 00 00 00];
+			clocks = <&nsscc NSS_CC_PORT1_MAC_CLK>,
+				 <&nsscc NSS_CC_PORT1_RX_CLK>,
+				 <&nsscc NSS_CC_PORT1_TX_CLK>;
+			clock-names = "mac",
+				      "rx",
+				      "tx";
+			resets = <&nsscc NSS_CC_PORT1_MAC_CLK_ARES>,
+				 <&nsscc NSS_CC_PORT1_RX_CLK_ARES>,
+				 <&nsscc NSS_CC_PORT1_TX_CLK_ARES>;
+			reset-names = "mac",
+				      "rx",
+				      "tx";
+		};
+
+		gmac2: port@2 {
+			reg = <2>;
+			label = "lan";
+			phy-mode = "qsgmii";
+			phy-handle = <&phy1>;
+			pcs-handle = <&pcs1_ch0>;
+			local-mac-address = [00 00 00 00 00 00];
+			clocks = <&nsscc NSS_CC_PORT2_MAC_CLK>,
+				 <&nsscc NSS_CC_PORT2_RX_CLK>,
+				 <&nsscc NSS_CC_PORT2_TX_CLK>;
+			clock-names = "mac",
+				      "rx",
+				      "tx";
+			resets = <&nsscc NSS_CC_PORT2_MAC_CLK_ARES>,
+				 <&nsscc NSS_CC_PORT2_RX_CLK_ARES>,
+				 <&nsscc NSS_CC_PORT2_TX_CLK_ARES>;
+			reset-names = "mac",
+				      "rx",
+				      "tx";
+		};
+	};
+};
+
+&pcs0 {
+	status = "okay";
+};
+
+&pcs1 {
+	status = "okay";
+};
+
+&tlmm {
+	mdio_pins: mdio-state {
+		mdc-pins {
+			pins = "gpio27";
+			function = "mdc1";
+			drive-strength = <8>;
+			bias-disable;
+		};
+
+		mdio-pins {
+			pins = "gpio28";
+			function = "mdio1";
+			drive-strength = <8>;
+			bias-pull-up;
+		};
+	};
+};
