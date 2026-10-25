@@ -61,7 +61,7 @@
 				nand-bus-width = <8>;
 
 				partitions {
-					compatible = "qcom,smem-parts";
+					compatible = "qcom,smem-part";
 				};
 			};
 		};
