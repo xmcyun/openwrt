@@ -10,12 +10,13 @@ case "$FIRMWARE" in
 "ath12k/QCN9274/hw2.0/cal-pci-0001:01:00.0.bin")
 	case "$board" in
 	tp-link,tl7dr6560)
-		# TODO(M4 真机):ART(0xA0000)内 QCN9224 caldata 偏移待定位。
-		# 静态预扫(PC侧):实质数据区仅 0x0-0x1051(头/MAC)、0x10ac0-0x26875(89.5K,最强候选,
-		# 疑 0x10800 对齐起点)、0x30da9-0x32045(4K);其余为 0x00/0xFF 空区。
-		# 真机法:stock cnss 日志(caldata_2.bin=0x2d000)+ ath12k 加载日志试错;或 dd 各候选窗
-		# hexdump 与 stock /tmp 运行态 caldata_2.bin(md5)比对。
-		caldata_extract "0:ART" 0x0 0x2d000
+		# 5G QCN6224 caldata: stock /lib/read_caldata_to_fs.sh ap-mi01.6* branch
+		# reads art offset 157696 (0x26880) len 184320 (0x2d000); PC-side
+		# verification: art[0x26880:+0x2d000] is 95.6% byte-identical to the
+		# stock runtime caldata_2.bin (residual = driver/FTM runtime re-patch).
+		# 2.4G (IPQ5332 AHB, M4b future): art offset 0x1000 len 0x20000
+		# (md5 byte-exact vs stock runtime caldata.bin).
+		caldata_extract "0:ART" 0x26880 0x2d000
 		;;
 	esac
 	;;
